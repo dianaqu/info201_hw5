@@ -1,0 +1,150 @@
+---
+title: "Assignment 5"
+output: html_document
+---
+
+
+```{r, echo=FALSE, message=FALSE}
+
+  # install.packages('jsonlite')
+  # install.packages('httr')
+  # install.packages('dplyr')
+  
+  library(jsonlite)
+  library(httr)
+  library(dplyr)
+  
+  # the base uri 
+  base <- 'https://congress.api.sunlightfoundation.com'
+  resource <- '/districts/locate' # the resource to go to
+  uri <- paste0(base, resource)
+  query.params <- list(zip = 98105) # the query
+  response <- GET(uri, query = query.params)
+  
+  body <- fromJSON(content(response, "text"))
+  state.district <- body$results
+```
+## My zip code is 98105 and my congressional district is `r state.district$district`
+
+```{r, echo=FALSE, message=FALSE}
+  # install.packages("knitr")
+  # install.packages('Hmisc')
+  library(knitr)
+  library(Hmisc)
+  library(dplyr)
+  
+  # the base uri 
+  #base <- 'https://congress.api.sunlightfoundation.com'
+  resource <- '/legislators/locate' # the resource to go to
+  uri <- paste0(base, resource)
+  query.params <- list(zip = 98105) # the query
+  response <- GET(uri, query = query.params)
+  body <- fromJSON(content(response, "text"))
+  # get the result
+  state.legislators.whole <- body$results
+  state.legislators <- state.legislators.whole %>% select('First Name' = first_name, 'Last Name' = last_name, title, party, chamber, phone, website, 'Twitter' = twitter_id)
+  colnames(state.legislators) <- capitalize(colnames(state.legislators))
+  state.legislators$Website <- paste0("[link](", state.legislators$website, ")")
+  state.legislators$Twitter <- paste0("[link](http://twitter.com/", state.legislators$Twitter, ")")
+  
+  kable(state.legislators)
+```
+
+```{r, echo=FALSE, message=FALSE}
+
+  # install.packages('jsonlite')
+  # install.packages('httr')
+  # install.packages('dplyr')
+  
+  library(jsonlite)
+  library(httr)
+  library(dplyr)
+  
+  useIDFindCommittee <- function(my.id) {
+    # the base uri 
+    base <- 'https://congress.api.sunlightfoundation.com'
+    resource <- '/committees' # the resource to go to
+    uri <- paste0(base, resource)
+    query.params <- list(member_ids = my.id) # the query
+    response <- GET(uri, query = query.params)
+    body <- fromJSON(content(response, "text"))
+    
+    committee.info <- body$results
+    return(committee.info)
+  }
+  base <- 'https://congress.api.sunlightfoundation.com'
+  resource <- '/committees' # the resource to go to
+  uri <- paste0(base, resource)
+
+  representative.id <- state.legislators.whole$bioguide_id
+  separte.dataframe <- lapply(representative.id, useIDFindCommittee)
+
+  setID <- function(i) {
+    separte.dataframe[[i]]$id <- representative.id[i]
+    return(separte.dataframe[[i]])
+  }
+  separte.dataframe <- lapply(1:length(representative.id), setID)
+  single.dataframe <- bind_rows(separte.dataframe)
+  
+  partial.name <- state.legislators.whole %>% select(bioguide_id, first_name, last_name)
+  new.with.name <- left_join(partial.name, single.dataframe, by = c('bioguide_id' = 'id'))
+  
+  for.graph <- new.with.name %>% group_by(first_name, last_name) %>% summarise(count = n()) %>% arrange(count)
+  
+  par(las=1)
+  par(mar=c(5,8,4,2))
+  
+  barplot(for.graph$count, main="Committees Served on by Each Rep.", xlab="# Committees", horiz=TRUE, names.arg = paste(for.graph$first_name, for.graph$last_name))
+```
+
+```{r, echo=FALSE, message=FALSE}
+
+
+  # install.packages('jsonlite')
+  # install.packages('httr')
+  # install.packages('dplyr')
+  
+  library(jsonlite)
+  library(httr)
+  library(dplyr)
+  filter.sub.false <- new.with.name %>% filter(subcommittee == FALSE)
+  random.committee <- filter.sub.false[sample(nrow(filter.sub.false), 1), ]
+  
+  base <- 'https://congress.api.sunlightfoundation.com'
+  resource <- '/committees' # the resource to go to
+  uri <- paste0(base, resource)
+  query.params <- list(fields = 'members', committee_id = random.committee$committee_id, per_page = "all")
+  response <- GET(uri, query = query.params)
+  body <- fromJSON(content(response, "text"))$results$members[[1]] %>% flatten()
+  
+  # find the first and last name of chairman
+  filtered.chair.dataframe <- body %>% filter(title == 'Chairman')
+  chair.name <- paste(filtered.chair.dataframe$legislator.first_name, filtered.chair.dataframe$legislator.last_name)
+  
+  # find the number of people on this committee
+  number.of.people <- nrow(body)
+  
+  # find out my reps is min or maj
+  my.res.side <- body %>% filter(legislator.bioguide_id == random.committee$bioguide_id) %>% select(side)
+  
+  # something about what the committee do
+  committee.name <- random.committee$name
+  
+  # find the gender districution on the committee
+  male <- round(nrow(body %>% filter(legislator.gender == 'M')) / number.of.people * 100, 2)
+  female <- round(nrow(body %>% filter(legislator.gender == 'F')) / number.of.people * 100, 2)
+```
+
+```
+The Chairman of the committee "`r committee.name`" is `r chair.name`.
+
+There are `r number.of.people` people in this committee.
+
+My representative `r paste(random.committee$first_name, random.committee$last_name)` is on the `r my.res.side` side of the committee.
+
+Committee "`r committee.name`"" do xxxxxxxxx.
+
+The gender distribution in this committe is `r male`% male and `r female`% female.
+```
+
+
